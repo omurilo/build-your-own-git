@@ -147,8 +147,17 @@ func GetCommitHashObject(treeHash [20]byte, messages ...string) ([20]byte, []byt
 	offsetMinutes := (offset % 3600) / 60
 	tzOffset := fmt.Sprintf("%+03d%02d", offsetHours, int(math.Abs(float64(offsetMinutes))))
 
+	branch := GetHeadBranch()
+	var parent []byte
+	if parentFile, err := os.ReadFile(fmt.Sprintf(".git/refs/heads/%s", branch)); err == nil {
+		parent = append(parent, parentFile[0:len(parentFile)-1]...)
+	}
+
 	var body []byte
 	body = append(body, fmt.Appendf(nil, "tree %x\n", treeHash)...)
+	if parent != nil {
+		body = append(body, fmt.Appendf(nil, "parent %s\n", parent)...)
+	}
 	body = append(body, fmt.Appendf(nil, "author %s <%s> %d %s\n", authorName, authorEmail, ts, tzOffset)...)
 	body = append(body, fmt.Appendf(nil, "committer %s <%s> %d %s\n\n", authorName, authorEmail, ts, tzOffset)...)
 	for _, message := range messages {

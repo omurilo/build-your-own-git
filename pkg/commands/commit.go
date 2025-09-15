@@ -26,10 +26,16 @@ func Commit(args ...string) {
 	hash, object := utils.GetCommitHashObject(treeHash, messages...)
 	utils.SaveHashedObject(hash, object)
 	branch := utils.GetHeadBranch()
-	refBranchHead, _ := os.Create(filepath.Join(".git", "refs", "heads", branch))
+	_ = os.MkdirAll(filepath.Join(".git", "refs", "heads"), 0755)
+	refBranchHead, err := os.Create(filepath.Join(".git", "refs", "heads", branch))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %+v", err)
+		os.Exit(1)
+	}
 	defer refBranchHead.Close()
 
-	_, err := fmt.Fprintf(refBranchHead, "%x", hash)
+	fmt.Printf("%v %x", refBranchHead, hash)
+	_, err = fmt.Fprintf(refBranchHead, "%x", hash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %+v", err)
 		os.Exit(1)
@@ -41,8 +47,8 @@ func Commit(args ...string) {
 	indexFile := ReadIndex(args...)
 
 	for _, e := range indexFile.Entries {
-		// hash, object, _ := utils.GetBlobHashObject(e.Path)
-		// utils.SaveHashedObject(hash, object)
+		hash, object, _ := utils.GetBlobHashObject(e.Path)
+		utils.SaveHashedObject(hash, object)
 		fmt.Printf("create mode %s %s\n", utils.TreeModeString(os.FileMode(e.Mode)), e.Path)
 	}
 }
