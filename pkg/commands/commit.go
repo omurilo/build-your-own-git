@@ -2,12 +2,22 @@ package commands
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"time"
 
+	"github.com/codecrafters-io/git-starter-go/pkg/types"
 	"github.com/codecrafters-io/git-starter-go/pkg/utils"
 )
+
+type CommitStatus struct {
+	Mode  string
+	Stage string
+	Path  string
+}
 
 func Commit(args ...string) {
 	if len(args) < 4 {
@@ -22,6 +32,13 @@ func Commit(args ...string) {
 		}
 	}
 
+	headTree := map[string]types.TreeEntry{}
+
+	indexFile := ReadIndex(args...)
+	headTreeObject := ReadHead()
+	maps.Copy(headTree, extractTreeEntries(".", headTreeObject.Entries))
+	dirTree, _ := utils.GetDirTree(".", []string{}, false)
+
 	treeHash := WriteTree()
 	hash, object := utils.GetCommitHashObject(treeHash, messages...)
 	utils.SaveHashedObject(hash, object)
@@ -34,21 +51,66 @@ func Commit(args ...string) {
 	}
 	defer refBranchHead.Close()
 
-	fmt.Printf("%v %x", refBranchHead, hash)
 	_, err = fmt.Fprintf(refBranchHead, "%x", hash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %+v", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stdout, "[%s %x] %s\n", branch, hash[0:7], messages[0])
+	fmt.Fprintf(os.Stdout, "[%s %s] %s\n", branch, fmt.Sprintf("%x", hash[:])[:7], messages[0])
 	fmt.Fprintf(os.Stdout, "Date: %s\n", time.Now().Format("Mon Jan 2 15:04:05 2006 -0700"))
 
-	indexFile := ReadIndex(args...)
+	commitTree := []CommitStatus{}
 
 	for _, e := range indexFile.Entries {
-		hash, object, _ := utils.GetBlobHashObject(e.Path)
-		utils.SaveHashedObject(hash, object)
-		fmt.Printf("create mode %s %s\n", utils.TreeModeString(os.FileMode(e.Mode)), e.Path)
+		valueHead, inHead := headTree[e.Path]
+		if !inHead {
+			hash, object, _ := utils.GetBlobHashObject(e.Path)
+			utils.SaveHashedObject(hash, object)
+			commitTree = append(commitTree, CommitStatus{
+				Path: e.Path, Mode: utils.TreeModeString(os.FileMode(e.Mode)), Stage: "create",
+			})
+		} else if string(valueHead.Hash) != fmt.Sprintf("%x", e.SHA1[:]) {
+			hash, object, _ := utils.GetBlobHashObject(e.Path)
+			utils.SaveHashedObject(hash, object)
+		}
 	}
+
+	for path, entry := range headTree {
+		if !slices.Contains(dirTree, path) {
+			commitTree = append(commitTree, CommitStatus{
+				Path: entry.Name, Mode: entry.Mode, Stage: "delete",
+			})
+		}
+	}
+
+	sort.Slice(commitTree, func(i, j int) bool {
+		return commitTree[i].Path < commitTree[j].Path
+	})
+
+	for _, e := range commitTree {
+		if e.Stage == "create" {
+			fmt.Printf("create mode %s %s\n", e.Mode, e.Path)
+		} else if e.Stage == "delete" {
+			fmt.Printf("delete mode %s %s\n", e.Mode, e.Path)
+		}
+	}
+}
+
+func extractTreeEntries(basePath string, entries []types.TreeEntry) map[string]types.TreeEntry {
+	hashes := map[string]types.TreeEntry{}
+	for _, entry := range entries {
+		if utils.ModeStringToKind(entry.Mode) == "tree" {
+			hash := fmt.Sprintf("%x", entry.Hash[:])
+
+			treeFileData := CatFileReadObject(hash[0:2], hash[2:])
+			headTreeObject, _ := DeserializeTreeObject(treeFileData)
+			subtreeHahses := extractTreeEntries(entry.Name, headTreeObject.Entries)
+			maps.Copy(hashes, subtreeHahses)
+		} else {
+			hashes[filepath.Join(basePath, entry.Name)] = entry
+		}
+	}
+
+	return hashes
 }

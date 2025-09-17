@@ -2,10 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
+	"maps"
 	"os"
 
+	"github.com/codecrafters-io/git-starter-go/pkg/types"
 	"github.com/codecrafters-io/git-starter-go/pkg/utils"
 )
 
@@ -13,13 +14,6 @@ func Add(args ...string) {
 	if len(args) < 3 {
 		fmt.Fprintf(os.Stderr, "usage: ccgit add [<file>...]\n")
 		os.Exit(1)
-	}
-
-	if str, ok := os.LookupEnv("LOG_LEVEL"); ok {
-		switch str {
-		case "debug", "DEBUG":
-			slog.SetLogLoggerLevel(slog.LevelDebug)
-		}
 	}
 
 	ignoreFile, _ := os.ReadFile(".gitignore")
@@ -38,16 +32,20 @@ func Add(args ...string) {
 		i++
 	}
 
+	var errorPaths []string
 	var paths []string
 	for _, arg := range args[2:] {
-		dirOrFile, err := os.Open(arg)
+		stat, err := os.Stat(arg)
 		if err != nil {
-			log.Fatalf("Error to add file(s), %v", err)
+			if os.IsNotExist(err) {
+				errorPaths = append(errorPaths, arg)
+				continue
+			} else {
+				fmt.Fprintf(os.Stderr, "Error to add file: %v\n", err)
+				os.Exit(1)
+			}
 		}
-		stat, err := dirOrFile.Stat()
-		if err != nil {
-			log.Fatalf("Error to add file(s), %v", err)
-		}
+
 		if stat.IsDir() {
 			fileNames, _ := utils.GetDirTree(stat.Name(), ignoreNames, true)
 			paths = append(paths, fileNames...)
@@ -56,10 +54,48 @@ func Add(args ...string) {
 		}
 	}
 
-	for _, path := range paths {
-		hash, _, content := utils.GetBlobHashObject(path)
-		slog.Debug(fmt.Sprintf("%s - %x - %+v", path, hash, string(content)))
+	if len(errorPaths) > 0 {
+		headTree := map[string]string{}
+		indexEntries := map[string]string{}
 
-		UpdateIndex(path, hash)
+		indexFile := ReadIndex(args...)
+		for _, entry := range indexFile.Entries {
+			hash := fmt.Sprintf("%x", entry.SHA1[:])
+			indexEntries[entry.Path] = hash
+		}
+
+		headTreeObject := ReadHead()
+		maps.Copy(headTree, ExtractTreeHashs(".", headTreeObject.Entries))
+
+		for _, path := range errorPaths {
+			// _, inHead := headTree[path]
+			indexHash, inIndex := indexEntries[path]
+
+			var newIndexEntries []types.Entry
+			if inIndex {
+				for _, entry := range indexFile.Entries {
+					if indexHash == fmt.Sprintf("%x", entry.SHA1[:]) {
+						continue
+					}
+
+					newIndexEntries = append(newIndexEntries, entry)
+				}
+
+				WriteIndex(newIndexEntries)
+				return
+			} else {
+				fmt.Fprintf(os.Stderr, "fatal: pathspec '%s' did not match any files\n", path)
+				os.Exit(1)
+			}
+		}
+	}
+
+	if len(paths) > 0 {
+		for _, path := range paths {
+			hash, _, content := utils.GetBlobHashObject(path)
+			slog.Debug(fmt.Sprintf("%s - %x - %+v", path, hash, string(content)))
+
+			UpdateIndex(path, hash)
+		}
 	}
 }

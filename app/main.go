@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/codecrafters-io/git-starter-go/pkg/commands"
@@ -12,6 +13,13 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "usage: ccgit <command> [<args>...]\n")
 		os.Exit(1)
+	}
+
+	if str, ok := os.LookupEnv("LOG_LEVEL"); ok {
+		switch str {
+		case "debug", "DEBUG":
+			slog.SetLogLoggerLevel(slog.LevelDebug)
+		}
 	}
 
 	switch command := os.Args[1]; command {
@@ -30,7 +38,7 @@ func main() {
 	case "init":
 		commands.InitRepository(os.Args...)
 	case "cat-file":
-		commands.CatFile(os.Args...)
+		commands.CatFile(os.Stdout, os.Args...)
 	case "hash-object":
 		commands.GetHashObjects(os.Args...)
 	case "add":

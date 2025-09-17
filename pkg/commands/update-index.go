@@ -62,6 +62,11 @@ func UpdateIndex(path string, hash [20]byte) {
 		return entries[i].Path < entries[j].Path
 	})
 
+	indexBuffer := WriteIndex(entries)
+	slog.Debug("Index buffer:\n%+v", indexBuffer)
+}
+
+func WriteIndex(entries []types.Entry) bytes.Buffer {
 	indexFile, err := os.Create(".git/index")
 	if err != nil {
 		log.Fatalf("Error to describe file: %v", err)
@@ -84,5 +89,5 @@ func UpdateIndex(path string, hash [20]byte) {
 	indexBuffer.Write(sum[:])
 	_, _ = indexFile.Write(indexBuffer.Bytes())
 
-	slog.Debug("Index buffer:\n%+v", indexBuffer)
+	return indexBuffer
 }

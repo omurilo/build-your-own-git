@@ -15,7 +15,7 @@ import (
 	"github.com/codecrafters-io/git-starter-go/pkg/utils"
 )
 
-func CatFile(args ...string) {
+func CatFile(writer io.Writer, args ...string) {
 	err := utils.CheckGitRepo(".", false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -31,19 +31,33 @@ func CatFile(args ...string) {
 	hash := args[pos+1]
 	folder, file := hash[0:2], hash[2:]
 
-	fileContent, _ := os.Open(fmt.Sprintf(".git/objects/%s/%s", folder, file))
-	defer fileContent.Close()
+	decompressedData := CatFileReadObject(folder, file)
 
-	r, err := zlib.NewReader(fileContent)
-	if err != nil {
-		panic(err)
-	}
-	decompressedData, err := io.ReadAll(r)
-	if err != nil {
-		log.Fatalf("Failed to read index: %v", err)
-	}
-	r.Close()
+	kind := CatFileExtractKind(decompressedData)
 
+	if slices.Contains(args, "-t") {
+		fmt.Println(kind)
+		return
+	}
+
+	switch kind {
+	case "blob":
+		fmt.Fprintf(writer, "%+v", strings.Join(strings.Split(string(decompressedData), "\x00")[1:], "\x00"))
+	case "tree":
+		treeObject, err := DeserializeTreeObject(decompressedData)
+		if err != nil {
+			log.Fatalf("An error ocurred on read file, %v", err)
+		}
+		slog.Debug(fmt.Sprintf("data: %+v\n", treeObject))
+		for _, entry := range treeObject.Entries {
+			fmt.Fprintf(writer, "%s %s %x %s\n", entry.Mode, utils.ModeStringToKind(entry.Mode), entry.Hash, entry.Name)
+		}
+	case "commit":
+		fmt.Fprintf(writer, "%+v", strings.Join(strings.Split(string(decompressedData), "\x00")[1:], "\x00"))
+	}
+}
+
+func CatFileExtractKind(decompressedData []byte) string {
 	var kind string
 	i := 0
 	for i < len(decompressedData) {
@@ -58,27 +72,26 @@ func CatFile(args ...string) {
 		kind = string(decompressedData[startKind:i])
 		i++
 	}
+	return kind
+}
 
-	if slices.Contains(args, "-t") {
-		fmt.Println(kind)
-		return
+func CatFileReadObject(folder string, file string) []byte {
+	fileContent, err := os.Open(fmt.Sprintf(".git/objects/%s/%s", folder, file))
+	if err != nil {
+		log.Fatalf("Error: %+v", err)
 	}
+	defer fileContent.Close()
 
-	switch kind {
-	case "blob":
-		fmt.Printf("%+v", strings.Join(strings.Split(string(decompressedData), "\x00")[1:], "\x00"))
-	case "tree":
-		treeObject, err := DeserializeTreeObject(decompressedData)
-		if err != nil {
-			log.Fatalf("An error ocurred on read file, %v", err)
-		}
-		slog.Debug(fmt.Sprintf("data: %+v\n", treeObject))
-		for _, entry := range treeObject.Entries {
-			fmt.Printf("%s %s %x %s\n", entry.Mode, utils.ModeStringToKind(entry.Mode), entry.Hash, entry.Name)
-		}
-	case "commit":
-		fmt.Printf("%+v", strings.Join(strings.Split(string(decompressedData), "\x00")[1:], "\x00"))
+	r, err := zlib.NewReader(fileContent)
+	if err != nil {
+		panic(err)
 	}
+	decompressedData, err := io.ReadAll(r)
+	if err != nil {
+		log.Fatalf("Failed to read index: %v", err)
+	}
+	r.Close()
+	return decompressedData
 }
 
 func DeserializeTreeObject(data []byte) (*types.TreeObject, error) {

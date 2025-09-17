@@ -2,64 +2,68 @@ package commands
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/codecrafters-io/git-starter-go/pkg/types"
 	"github.com/codecrafters-io/git-starter-go/pkg/utils"
 )
 
 func Status(args ...string) {
-	indexFile := ReadIndex(args...)
+	headTree := map[string]string{}
+	indexEntries := map[string]string{}
+	workingFiles := map[string]string{}
 
-	// for each entry, check if it exists on dir tree to determine the status
-	matchedFiles := map[string]bool{}
+	indexFile := ReadIndex(args...)
+	for _, entry := range indexFile.Entries {
+		hash := fmt.Sprintf("%x", entry.SHA1[:])
+		indexEntries[entry.Path] = hash
+	}
+
+	headTreeObject := ReadHead()
+	maps.Copy(headTree, ExtractTreeHashs(".", headTreeObject.Entries))
+
+	dirTree, _ := utils.GetDirTree(".", []string{}, false)
+	for _, path := range dirTree {
+		hash, _, _ := utils.GetBlobHashObject(path)
+		workingFiles[path] = fmt.Sprintf("%x", hash[:])
+	}
+
 	var changedFiles []string
 	var untrackedFiles []string
 	var deletedFiles []string
+	var stagedFiles []string
+	for path, shaDisk := range workingFiles {
+		shaIndex, inIndex := indexEntries[path]
+		shaHead, inHead := headTree[path]
 
-	ignoreFile, _ := os.ReadFile(".gitignore")
-	var ignoreNames []string
-	i := 0
-	for i < len(ignoreFile) {
-		startPath := i
-
-		for i < len(ignoreFile) && ignoreFile[i] != '\n' {
-			i++
+		if !inIndex && !inHead {
+			// untracked
+			untrackedFiles = append(untrackedFiles, path)
 		}
 
-		pathComp := string(ignoreFile[startPath:i])
-
-		ignoreNames = append(ignoreNames, pathComp)
-		i++
-	}
-
-	dirNames, _ := utils.GetDirTree(".", ignoreNames, false)
-
-	for _, fileName := range dirNames {
-		for _, entry := range indexFile.Entries {
-			if _, ok := matchedFiles[entry.Path]; !ok {
-				matchedFiles[entry.Path] = false
-			}
-			if entry.Path == fileName {
-				matchedFiles[entry.Path] = true
-				hash, _, _ := utils.GetBlobHashObject(entry.Path)
-				if hash != entry.SHA1 {
-					changedFiles = append(changedFiles, entry.Path)
-				}
-			}
+		if inIndex && shaDisk != shaIndex {
+			// modified, not staged
+			changedFiles = append(changedFiles, path)
 		}
 
-		_, ok := matchedFiles[fileName]
-
-		if !ok {
-			untrackedFiles = append(untrackedFiles, fileName)
+		if inIndex && (shaIndex != shaHead) {
+			// staged changes
+			stagedFiles = append(stagedFiles, path)
 		}
 	}
 
-	for fileName, matched := range matchedFiles {
-		if !matched {
-			deletedFiles = append(deletedFiles, fileName)
+	for path := range headTree {
+		_, inIndex := indexEntries[path]
+		_, inDisk := workingFiles[path]
+
+		if !inIndex && !inDisk {
+			stagedFiles = append(stagedFiles, path)
+		} else if inIndex && !inDisk {
+			deletedFiles = append(deletedFiles, path)
 		}
 	}
 
@@ -67,11 +71,38 @@ func Status(args ...string) {
 
 	fmt.Fprintf(os.Stdout, "On branch %s\n", branch)
 
-	if len(deletedFiles) == 0 && len(changedFiles) == 0 && len(untrackedFiles) == 0 {
+	if len(deletedFiles) == 0 && len(changedFiles) == 0 && len(untrackedFiles) == 0 && len(stagedFiles) == 0 {
 		fmt.Fprintf(os.Stdout, "nothing to commit, working tree clean")
 	}
 
-	if len(deletedFiles) > 0 || len(changedFiles) > 0 {
+	if len(stagedFiles) > 0 {
+		fmt.Fprintf(os.Stdout, "Changes to be committed:\n")
+		files := make([]types.FileInfo, 0, len(stagedFiles))
+
+		for _, file := range stagedFiles {
+			var stage string
+			if _, ok := headTree[file]; !ok {
+				stage = "new file"
+			} else if _, ok := workingFiles[file]; !ok {
+				stage = "deleted"
+			} else {
+				stage = "modified"
+			}
+
+			files = append(files, types.FileInfo{Path: file, Stage: stage})
+		}
+
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].Path < files[j].Path
+		})
+
+		for _, file := range files {
+			fmt.Fprintf(os.Stdout, "\t%s:\t%s\n", file.Stage, file.Path)
+		}
+		fmt.Println()
+	}
+
+	if len(deletedFiles)+len(changedFiles) > 0 {
 		fmt.Fprintf(os.Stdout, "Changes not staged for commit:\n")
 		files := make([]types.FileInfo, 0, len(changedFiles)+len(deletedFiles))
 
@@ -98,4 +129,48 @@ func Status(args ...string) {
 			fmt.Fprintf(os.Stdout, "\t%s\n", file)
 		}
 	}
+}
+
+func ReadHead() *types.TreeObject {
+	headHash := utils.GetHeadHash()
+
+	if len(headHash) == 0 {
+		return &types.TreeObject{}
+	}
+
+	headHashFile := CatFileReadObject(string(headHash[0:2]), string(headHash[2:]))
+	treeHash := extractCommitTreeHash(headHashFile)
+	treeFileData := CatFileReadObject(string(treeHash[0:2]), string(treeHash[2:]))
+	headTreeObject, _ := DeserializeTreeObject(treeFileData)
+
+	return headTreeObject
+}
+
+func extractCommitTreeHash(data []byte) []byte {
+	var hash []byte
+	content := strings.Join(strings.Split(string(data), "\x00")[1:], "\x00")
+	content = strings.Split(content, "\n")[0]
+	strs := strings.Split(content, " ")
+	content = strs[len(strs)-1]
+	hash = append(hash, []byte(content)...)
+	return hash
+}
+
+func ExtractTreeHashs(basePath string, entries []types.TreeEntry) map[string]string {
+	hashes := map[string]string{}
+	for _, entry := range entries {
+		if utils.ModeStringToKind(entry.Mode) == "tree" {
+			hash := fmt.Sprintf("%x", entry.Hash[:])
+
+			treeFileData := CatFileReadObject(hash[0:2], hash[2:])
+			headTreeObject, _ := DeserializeTreeObject(treeFileData)
+			subtreeHahses := ExtractTreeHashs(entry.Name, headTreeObject.Entries)
+			maps.Copy(hashes, subtreeHahses)
+		} else {
+			hash := fmt.Sprintf("%x", entry.Hash[:])
+			hashes[filepath.Join(basePath, entry.Name)] = hash
+		}
+	}
+
+	return hashes
 }

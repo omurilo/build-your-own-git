@@ -76,6 +76,42 @@ func GetHeadBranch() string {
 	return branch
 }
 
+func GetHeadHash() []byte {
+	branch := GetHeadBranch()
+	var headHash []byte
+	headFile, err := os.ReadFile(fmt.Sprintf(".git/refs/heads/%s", branch))
+	if err != nil {
+		packedRefsFile, _ := os.ReadFile(".git/packed-refs")
+		i := 0
+		for i < len(packedRefsFile) {
+			startLine := i
+			for i < len(packedRefsFile) && packedRefsFile[i] != '\n' {
+				i++
+			}
+			packedRefLine := packedRefsFile[startLine:i]
+			line := strings.Split(string(packedRefLine), " ")
+			if strings.Contains(line[1], branch) {
+				headHash = append(headHash, packedRefLine[0:20]...)
+			}
+			i++
+		}
+
+		return headHash
+	}
+
+	i := 0
+	for i < len(headFile) {
+		startHash := i
+		for i < len(headFile) && headFile[i] != '\n' {
+			i++
+		}
+		headHash = append(headHash, headFile[startHash:i]...)
+		i++
+	}
+
+	return headHash
+}
+
 func GetDirTree(path string, ignores []string, sub bool) ([]string, error) {
 	dirTree, _ := os.ReadDir(path)
 	var dirNames []string
@@ -147,11 +183,7 @@ func GetCommitHashObject(treeHash [20]byte, messages ...string) ([20]byte, []byt
 	offsetMinutes := (offset % 3600) / 60
 	tzOffset := fmt.Sprintf("%+03d%02d", offsetHours, int(math.Abs(float64(offsetMinutes))))
 
-	branch := GetHeadBranch()
-	var parent []byte
-	if parentFile, err := os.ReadFile(fmt.Sprintf(".git/refs/heads/%s", branch)); err == nil {
-		parent = append(parent, parentFile[0:len(parentFile)-1]...)
-	}
+	parent := GetHeadHash()
 
 	var body []byte
 	body = append(body, fmt.Appendf(nil, "tree %x\n", treeHash)...)
