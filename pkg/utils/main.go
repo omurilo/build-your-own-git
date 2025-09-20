@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 func ReadVarInt(data []byte, offset *int) uint {
@@ -153,7 +155,7 @@ func CheckGitRepo(path string, init bool) error {
 	return fmt.Errorf("Not is a git repository")
 }
 
-func GetBlobHashObject(path string) ([20]byte, []byte, []byte) {
+func GetBlobHashObject(path string) (h [20]byte, o []byte, c []byte) {
 	content, _ := os.ReadFile(path)
 	file_len := len(content)
 	var object []byte
@@ -229,4 +231,8 @@ func GetSlicePosition[T comparable](slice []T, element T) int {
 	}
 
 	return pos
+}
+
+func IsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }

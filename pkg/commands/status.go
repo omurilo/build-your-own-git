@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -13,6 +14,12 @@ import (
 )
 
 func Status(args ...string) {
+	var noColor bool
+	if slices.Contains(args, "--no-color") {
+		noColor = true
+	}
+	shouldColor := !noColor && utils.IsTerminal()
+
 	headTree := map[string]string{}
 	indexEntries := map[string]string{}
 	workingFiles := map[string]string{}
@@ -81,15 +88,34 @@ func Status(args ...string) {
 
 		for _, file := range stagedFiles {
 			var stage string
+			color := "\033[0m"
+
 			if _, ok := headTree[file]; !ok {
 				stage = "new file"
+				if shouldColor {
+					color = "\033[32m"
+				} else {
+					color = ""
+				}
+
 			} else if _, ok := workingFiles[file]; !ok {
 				stage = "deleted"
+				if shouldColor {
+					color = "\033[31m"
+				} else {
+					color = ""
+				}
+
 			} else {
 				stage = "modified"
+				if shouldColor {
+					color = "\033[0m"
+				} else {
+					color = ""
+				}
 			}
 
-			files = append(files, types.FileInfo{Path: file, Stage: stage})
+			files = append(files, types.FileInfo{Path: file, Stage: stage, Color: color})
 		}
 
 		sort.Slice(files, func(i, j int) bool {
@@ -119,14 +145,18 @@ func Status(args ...string) {
 		})
 
 		for _, file := range files {
-			fmt.Fprintf(os.Stdout, "\t%s:\t%s\n", file.Stage, file.Path)
+			fmt.Fprintf(os.Stdout, "\t%s%s:\t%s\033[0m\n", file.Color, file.Stage, file.Path)
 		}
 	}
 
 	if len(untrackedFiles) > 0 {
 		fmt.Fprintf(os.Stdout, "\nUntracked files:\n")
+		color := ""
 		for _, file := range untrackedFiles {
-			fmt.Fprintf(os.Stdout, "\t%s\n", file)
+			if shouldColor {
+				color = "\033[33m"
+			}
+			fmt.Fprintf(os.Stdout, "\t%s%s\033[0m\n", color, file)
 		}
 	}
 }

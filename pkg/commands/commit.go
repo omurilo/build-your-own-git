@@ -89,9 +89,10 @@ func Commit(args ...string) {
 	})
 
 	for _, e := range commitTree {
-		if e.Stage == "create" {
+		switch e.Stage{
+		case "create":
 			fmt.Printf("create mode %s %s\n", e.Mode, e.Path)
-		} else if e.Stage == "delete" {
+		case "delete":
 			fmt.Printf("delete mode %s %s\n", e.Mode, e.Path)
 		}
 	}

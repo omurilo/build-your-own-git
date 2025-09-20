@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/codecrafters-io/git-starter-go/pkg/commands"
-	"github.com/codecrafters-io/git-starter-go/pkg/utils"
 )
 
 func main() {
@@ -23,15 +22,6 @@ func main() {
 	}
 
 	switch command := os.Args[1]; command {
-	case "debug-commit":
-		var messages []string
-		for _, arg := range os.Args[2:] {
-			if arg != "-m" && arg != "-am" {
-				messages = append(messages, arg)
-			}
-		}
-		hash, object := utils.GetCommitHashObject([20]byte{}, messages...)
-		fmt.Printf("Hash: %x, Content: \n%s", hash, string(object))
 	case "debug-index":
 		indexFile := commands.ReadIndex(os.Args...)
 		fmt.Printf("Index File: \n%+v\n", indexFile)
@@ -49,6 +39,8 @@ func main() {
 		commands.WriteTree(os.Args...)
 	case "commit":
 		commands.Commit(os.Args...)
+	case "diff":
+		commands.Diff(os.Args...)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)

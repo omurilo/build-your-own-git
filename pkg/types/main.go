@@ -32,6 +32,7 @@ type TreeObject struct {
 type FileInfo struct {
 	Path  string
 	Stage string
+	Color string
 }
 
 type IndexFile struct {
