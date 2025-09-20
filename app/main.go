@@ -41,6 +41,8 @@ func main() {
 		commands.Commit(os.Args...)
 	case "diff":
 		commands.Diff(os.Args...)
+	case "push":
+		commands.Push(os.Args...)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)

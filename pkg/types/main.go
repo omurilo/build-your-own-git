@@ -72,6 +72,11 @@ type Entry struct {
 	Path string
 }
 
+type GitObject struct {
+	Type string
+	Data []byte
+}
+
 func (e Entry) ToBytes() []byte {
 	var buffer []byte
 

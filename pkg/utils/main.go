@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codecrafters-io/git-starter-go/pkg/types"
 	"golang.org/x/term"
 )
 
@@ -205,6 +208,45 @@ func GetCommitHashObject(treeHash [20]byte, messages ...string) ([20]byte, []byt
 	return hash, object
 }
 
+func GetPackObject(objects []types.GitObject) ([20]byte, []byte) {
+	var body bytes.Buffer
+	var header bytes.Buffer
+
+	header.Write([]byte("PACK"))
+	header.Write([]byte{0x00, 0x00, 0x00, 0x02})
+
+	count := uint32(len(objects))
+	binary.Write(&header, binary.BigEndian, count)
+
+	objectTypes := map[string]int{
+		"commit": 1,
+		"tree":   2,
+		"blob":   3,
+	}
+
+	for _, object := range objects {
+		objType := objectTypes[object.Type]
+
+		size := len(object.Data)
+		header := encodePackObjectHeader(objType, size)
+		body.Write(header)
+
+		var compressed bytes.Buffer
+		w := zlib.NewWriter(&compressed)
+		_, err := w.Write(object.Data)
+		if err != nil {
+			panic(err)
+		}
+		w.Close()
+
+		body.Write(compressed.Bytes())
+	}
+
+	sha := sha1.Sum(body.Bytes())
+	body.Write(sha[:])
+	return sha, body.Bytes()
+}
+
 func SaveHashedObject(hash [20]byte, object []byte) {
 	os.Mkdir(fmt.Sprintf(".git/objects/%x", hash[0:1]), 0755)
 	objectFile, err := os.Create(fmt.Sprintf(".git/objects/%x/%x", hash[0:1], hash[1:]))
@@ -222,6 +264,15 @@ func SaveHashedObject(hash [20]byte, object []byte) {
 	w.Close()
 }
 
+func GetUpdateRefLine(oldOid []byte, newOid []byte, ref string) []byte {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("%s %s %s\x00%s\n", oldOid, newOid, ref, "report-status side-band-64k"))
+	size := sb.Len() + 4
+
+	return fmt.Appendf([]byte{}, "%04x%s", size, sb.String())
+}
+
 func GetSlicePosition[T comparable](slice []T, element T) int {
 	pos := -1
 	for i, n := range slice {
@@ -235,4 +286,27 @@ func GetSlicePosition[T comparable](slice []T, element T) int {
 
 func IsTerminal() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+func encodePackObjectHeader(objType int, size int) []byte {
+	var header []byte
+	b := byte((objType << 4) | (size & 0x0F))
+	size >>= 4
+	if size == 0 {
+		header = append(header, b)
+		return header
+	}
+
+	b |= 0x80
+	header = append(header, b)
+
+	for size > 0 {
+		b = byte(size & 0x7F)
+		size >>= 7
+		if size > 0 {
+			b |= 0x80
+		}
+		header = append(header, b)
+	}
+	return header
 }
