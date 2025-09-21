@@ -218,6 +218,8 @@ func GetPackObject(objects []types.GitObject) ([20]byte, []byte) {
 	count := uint32(len(objects))
 	binary.Write(&header, binary.BigEndian, count)
 
+	body.Write(header.Bytes())
+
 	objectTypes := map[string]int{
 		"commit": 1,
 		"tree":   2,
@@ -244,6 +246,7 @@ func GetPackObject(objects []types.GitObject) ([20]byte, []byte) {
 
 	sha := sha1.Sum(body.Bytes())
 	body.Write(sha[:])
+
 	return sha, body.Bytes()
 }
 
@@ -267,8 +270,10 @@ func SaveHashedObject(hash [20]byte, object []byte) {
 func GetUpdateRefLine(oldOid []byte, newOid []byte, ref string) []byte {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("%s %s %s\x00%s\n", oldOid, newOid, ref, "report-status side-band-64k"))
+	sb.WriteString(fmt.Sprintf("%s %s %s\x00report-status side-band-64k agent=git/2.41.0\n", oldOid, newOid, ref))
 	size := sb.Len() + 4
+
+	fmt.Printf("%s %s %s\x00report-status side-band-64k agent=git/2.41.0\n", oldOid, newOid, ref)
 
 	return fmt.Appendf([]byte{}, "%04x%s", size, sb.String())
 }

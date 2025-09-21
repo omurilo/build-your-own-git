@@ -29,6 +29,11 @@ type TreeObject struct {
 	Entries []TreeEntry
 }
 
+type CommitObject struct {
+	Tree *TreeObject
+	// Parent *CommitObject
+}
+
 type FileInfo struct {
 	Path  string
 	Stage string
@@ -140,7 +145,6 @@ func (t *TreeObject) ToBytes() []byte {
 			nameJ += "/"
 		}
 
-		fmt.Println(nameI, nameJ, nameI < nameJ)
 		return nameI < nameJ
 	})
 

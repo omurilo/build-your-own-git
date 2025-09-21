@@ -150,3 +150,60 @@ func DeserializeTreeObject(data []byte) (*types.TreeObject, error) {
 
 	return &types.TreeObject{Entries: entries}, nil
 }
+
+func DeserializeCommitObject(data []byte) (*types.CommitObject, []byte, []byte, error) {
+	nulIndex := bytes.IndexByte(data, 0)
+	if nulIndex < 0 {
+		return nil, nil, nil, fmt.Errorf("formato inválido: header sem NUL")
+	}
+
+	header := string(data[:nulIndex])
+	body := data[nulIndex+1:]
+
+	var size int
+	_, err := fmt.Sscanf(header, "commit %d", &size)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("Commit file is corrupted")
+	}
+
+	var treeObject *types.TreeObject
+	treeHash := make([]byte, 40)
+	parentHash := make([]byte, 40)
+
+	i := 0
+	for i < len(body) {
+		startTree := i
+		for i < len(body) && body[i] != '\n' {
+			i++
+		}
+
+		if i >= len(body) {
+			return nil, nil, nil, fmt.Errorf("formato: sem espaço depois dda tree")
+		}
+
+		_, _ = fmt.Sscanf(string(body[startTree:i]), "tree %x", &treeHash)
+		i++
+
+		startParent := i
+		for i < len(body) && body[i] != '\n' {
+			i++
+		}
+
+		if i >= len(body) {
+			return nil, nil, nil, fmt.Errorf("formato: sem espaço depois do parent")
+		}
+
+		_, _ = fmt.Sscanf(string(body[startParent:i]), "parent %x", &parentHash)
+		i++
+
+		i += size - i
+
+		h := fmt.Sprintf("%x", treeHash[:])
+		treeFile := CatFileReadObject(h[:2], h[2:])
+		treeObject, _ = DeserializeTreeObject(treeFile)
+	}
+
+	return &types.CommitObject{
+		Tree: treeObject,
+	}, parentHash, treeHash, nil
+}
